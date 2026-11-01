@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Вход · Показатели регионов РФ</title>
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("dash-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+<style>
+  :root { --page: #f3f5f8; --surface: #ffffff; --ink: #1b2533; --ink-2: #4c5a6b; --muted: #8492a3;
+    --border: rgba(27, 37, 51, 0.12); --accent: #2a78d6; --accent-ink: #ffffff; --bad: #c23934;
+    --control-bg: #ffffff; --shadow: 0 1px 2px rgba(15, 30, 50, 0.06), 0 8px 24px rgba(15, 30, 50, 0.08); color-scheme: light; }
+  :root[data-theme="dark"] { --page: #0f141b; --surface: #171e27; --ink: #e8edf3; --ink-2: #b4bfcc; --muted: #8391a2;
+    --border: rgba(255, 255, 255, 0.12); --accent: #3987e5; --accent-ink: #ffffff; --bad: #f07470;
+    --control-bg: #10161e; --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35); color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--page); color: var(--ink);
+    font: 15px/1.45 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  form { width: 100%; max-width: 380px; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); padding: 28px 26px 24px; }
+  h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -0.01em; }
+  p.sub { margin: 0 0 22px; color: var(--ink-2); font-size: 13.5px; }
+  label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 14px; }
+  input { display: block; width: 100%; margin-top: 5px; font: inherit; font-size: 15px; color: var(--ink); background: var(--control-bg);
+    border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-height: 42px; text-transform: none; letter-spacing: 0; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  button { width: 100%; margin-top: 6px; min-height: 44px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-ink);
+    font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.6; cursor: progress; }
+  .err { min-height: 20px; margin: 12px 0 0; color: var(--bad); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<form id="login" autocomplete="on" novalidate>
+  <h1>Показатели регионов РФ</h1>
+  <p class="sub">Войдите, чтобы открыть дашборд.</p>
+  <label>Логин<input id="user" name="username" autocomplete="username" required autofocus></label>
+  <label>Пароль<input id="pass" name="password" type="password" autocomplete="current-password" required></label>
+  <button id="go" type="submit">Войти</button>
+  <p class="err" id="err" role="alert"></p>
+</form>
+<script>
+  // Дашборд зашифрован AES-GCM, ключ получается из логина и пароля через PBKDF2.
+  // Без верных логина и пароля содержимое страницы прочитать нельзя.
+  var P = { salt: "__SALT__", iv: "__IV__", iter: __ITER__, ct: "__CT__" };
+  var KEY = "dash-key";
+  function b64(s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); }
+  function show(html) { document.open(); document.write(html); document.close(); }
+  async function open(raw) {
+    var key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+    var buf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(P.iv) }, key, b64(P.ct));
+    return new TextDecoder().decode(buf);
+  }
+  async function derive(user, pass) {
+    var base = await crypto.subtle.importKey("raw", new TextEncoder().encode(user + "\n" + pass), "PBKDF2", false, ["deriveBits"]);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: b64(P.salt), iterations: P.iter, hash: "SHA-256" }, base, 256));
+  }
+  (async function () {
+    // Сохранённый в этой вкладке ключ: после обновления страницы вход не нужен
+    var saved = null;
+    try { saved = sessionStorage.getItem(KEY); } catch (e) {}
+    if (saved) {
+      document.documentElement.style.visibility = "hidden";
+      try {
+        var html = await open(b64(saved));
+        // Ждём, пока страница входа дочитается: иначе document.write допишет дашборд в её конец
+        if (document.readyState !== "complete") await new Promise(function (r) { addEventListener("load", r, { once: true }); });
+        show(html); return;
+      } catch (e) { try { sessionStorage.removeItem(KEY); } catch (e2) {} }
+      document.documentElement.style.visibility = "";
+    }
+    var f = document.getElementById("login"), err = document.getElementById("err"), go = document.getElementById("go");
+    f.addEventListener("submit", async function (ev) {
+      ev.preventDefault(); err.textContent = ""; go.disabled = true; go.textContent = "Проверяю…";
+      try {
+        var raw = await derive(document.getElementById("user").value.trim(), document.getElementById("pass").value);
+        var html = await open(raw);
+        try { sessionStorage.setItem(KEY, btoa(String.fromCharCode.apply(null, raw))); } catch (e) {}
+        show(html);
+      } catch (e) {
+        err.textContent = "Неверный логин или пароль.";
+        go.disabled = false; go.textContent = "Войти";
+        document.getElementById("pass").select();
+      }
+    });
+  })();
+</script>
+</body>
+</html>
